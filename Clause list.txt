@@ -1,0 +1,2 @@
+DWM RSI 60
+( {cash} ( ( {cash} ( latest rsi( 14 ) > 45 and weekly rsi( 14 ) > 60 and monthly rsi( 14 ) > 60 and monthly wma( monthly close , 30 ) > 60 and latest close > latest open and latest ema( close,15 ) > latest ema( close,50 ) and 1 day ago  ema( close,15 )<= 1 day ago  ema( close,50 ) ) ) ) ) 

@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stock Performance Dashboard</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; }
+        .container { width: 90%; margin: auto; display: none; }
+        .chart { width: 100%; height: 400px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid black; padding: 8px; text-align: center; position: relative; }
+        th { background-color: #f2f2f2; cursor: pointer; }
+        .tooltip { 
+            display: none; 
+            position: absolute; 
+            background: #fff3d0; 
+            border: 1px solid #ffd700; 
+            padding: 8px; 
+            border-radius: 4px;
+            box-shadow: 2px 2px 5px rgba(0,0,0,0.1);
+            font-size: 14px;
+            z-index: 1000;
+            max-width: 250px;
+        }
+        .pagination { margin: 20px; display: flex; justify-content: center; align-items: center; gap: 10px; }
+        .pagination button { padding: 8px 16px; background: #f0f0f0; border: 1px solid #ccc; cursor: pointer; }
+        .pagination button:disabled { background-color: #e0e0e0; cursor: not-allowed; opacity: 0.7; }
+        .pagination input { width: 60px; padding: 4px; text-align: center; }
+        .positive { color: #008000; }
+        .negative { color: #ff0000; }
+    </style>
+</head>
+<body>
+
+    <h2>Stock Performance Dashboard</h2>
+    <p id="error-message" style="color: red; font-weight: bold; display: none;">⚠️ Error: Unable to load data for the current date.</p>
+
+    <div class="container">
+        <h3>Stock Data Overview</h3>
+        <table id="stockTable">
+            <thead>
+                <tr>
+                    <th data-sort="stock">Stock ▾</th>
+                    <th data-sort="date">Date ▾</th>
+                    <th data-sort="price">Identified Price ▾</th>
+                    <th data-sort="1week">1 Week Return (%) ▾</th>
+                    <th data-sort="1month">1 Month Return (%) ▾</th>
+                    <th data-sort="3month">3 Month Return (%) ▾</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+
+        <div class="pagination">
+            <button id="prevPage" disabled>◀ Previous</button>
+            <span id="pageInfo"></span>
+            <input type="number" id="pageJump" min="1" value="1" style="display: none;">
+            <button id="nextPage" disabled>Next ▶</button>
+        </div>
+
+        <div id="priceTrendChart" class="chart"></div>
+
+        <h3>Performance Metrics</h3>
+        <div style="display: flex; justify-content: center; gap: 40px; margin: 20px 0;">
+            <div class="metric-box">
+                <div class="metric-label">Max Gain</div>
+                <div id="maxGain" class="metric-value positive"></div>
+            </div>
+            <div class="metric-box">
+                <div class="metric-label">Max Drawdown</div>
+                <div id="maxDrawdown" class="metric-value negative"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="tooltip" id="customTooltip"></div>
+
+    <script>
+        let stockData = [];
+        let currentPage = 1;
+        let rowsPerPage = 10;
+        let currentSort = { column: null, direction: 1 };
+
+        // Automatically fetch JSON file based on current date
+        function fetchStockData() {
+            const currentDate = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+            const jsonFile = `bactestresult_${currentDate}.json`;
+
+            fetch(jsonFile)
+                .then(response => {
+                    if (!response.ok) throw new Error('File not found');
+                    return response.json();
+                })
+                .then(data => {
+                    if (!Array.isArray(data)) throw new Error('Invalid data format');
+                    
+                    stockData = data.map(stock => cleanStockData(stock));
+                    document.querySelector('.container').style.display = "block";
+                    document.getElementById('error-message').style.display = "none";
+                    
+                    currentPage = 1;
+                    updateTable();
+                    updateMetrics();
+                    generateCharts();
+                })
+                .catch(error => {
+                    document.getElementById('error-message').style.display = "block";
+                    console.error('Error loading file:', error);
+                });
+        }
+
+        // Data Processing Functions
+        function cleanStockData(stock) {
+            const parseNumber = (value) => {
+                if (typeof value === 'string') {
+                    return parseFloat(value.replace(/[^0-9.-]/g, '')) || 0;
+                }
+                return value || 0;
+            };
+
+            return {
+                Stock: stock["Stock"] || "N/A",
+                Date: formatDate(stock["Date"]),
+                "Identified Price": parseNumber(stock["Identified Price"]),
+                "1 Week Return (%)": parseNumber(stock["1 Week Return (%)"]),
+                "1 Month Return (%)": parseNumber(stock["1 Month Return (%)"]),
+                "3 Month Return (%)": parseNumber(stock["3 Month Return (%)"]),
+                "1 Week Close Price": stock["Week Day 7 Close"] || "N/A",
+                "1 Month Close Price": stock["1 Month Close Price"] || "N/A",
+                "3 Month Close Price": stock["3 Month Close Price"] || "N/A"
+            };
+        }
+
+        function formatDate(date) {
+            if (!date) return "N/A";
+            const d = new Date(date);
+            return isNaN(d) ? "N/A" : d.toLocaleDateString("en-US", {
+                year: 'numeric', month: 'short', day: 'numeric'
+            });
+        }
+
+        // Table Management
+        function updateTable() {
+            const tableBody = document.querySelector("#stockTable tbody");
+            tableBody.innerHTML = "";
+            
+            const start = (currentPage - 1) * rowsPerPage;
+            const end = start + rowsPerPage;
+            const pageData = stockData.slice(start, end);
+
+            pageData.forEach(stock => {
+                const row = document.createElement("tr");
+                row.innerHTML = `
+                    <td>${stock.Stock}</td>
+                    <td>${stock.Date}</td>
+                    <td>${stock["Identified Price"].toFixed(2)}</td>
+                    <td class="return-cell" data-close="${stock["1 Week Close Price"]}">
+                        ${formatReturn(stock["1 Week Return (%)"])}
+                    </td>
+                    <td class="return-cell" data-close="${stock["1 Month Close Price"]}">
+                        ${formatReturn(stock["1 Month Return (%)"])}
+                    </td>
+                    <td class="return-cell" data-close="${stock["3 Month Close Price"]}">
+                        ${formatReturn(stock["3 Month Return (%)"])}
+                    </td>
+                `;
+                tableBody.appendChild(row);
+            });
+
+            updatePagination();
+            addTooltipListeners();
+        }
+
+        function formatReturn(value) {
+            const num = parseFloat(value);
+            const className = num >= 0 ? 'positive' : 'negative';
+            return `<span class="${className}">${num.toFixed(2)}%</span>`;
+        }
+
+        // Tooltip System
+        function addTooltipListeners() {
+            document.querySelectorAll('.return-cell').forEach(cell => {
+                cell.addEventListener('mouseover', function(e) {
+                    const tooltip = document.getElementById('customTooltip');
+                    const closePrice = this.dataset.close;
+                    tooltip.innerHTML = `Close Price: ${closePrice}<br>Return: ${this.querySelector('span').textContent}`;
+                    tooltip.style.display = 'block';
+                    tooltip.style.left = `${e.pageX + 15}px`;
+                    tooltip.style.top = `${e.pageY + 15}px`;
+                });
+
+                cell.addEventListener('mousemove', function(e) {
+                    const tooltip = document.getElementById('customTooltip');
+                    tooltip.style.left = `${e.pageX + 15}px`;
+                    tooltip.style.top = `${e.pageY + 15}px`;
+                });
+
+                cell.addEventListener('mouseout', () => {
+                    document.getElementById('customTooltip').style.display = 'none';
+                });
+            });
+        }
+
+        // Pagination System
+        function updatePagination() {
+            const totalPages = Math.ceil(stockData.length / rowsPerPage);
+            document.getElementById("pageInfo").textContent = `Page ${currentPage} of ${totalPages}`;
+            document.getElementById("prevPage").disabled = currentPage === 1;
+            document.getElementById("nextPage").disabled = currentPage === totalPages;
+        }
+
+        document.getElementById("prevPage").addEventListener("click", () => {
+            if (currentPage > 1) {
+                currentPage--;
+                updateTable();
+            }
+        });
+
+        document.getElementById("nextPage").addEventListener("click", () => {
+            if (currentPage < Math.ceil(stockData.length / rowsPerPage)) {
+                currentPage++;
+                updateTable();
+            }
+        });
+
+        // Performance Metrics
+        function updateMetrics() {
+            const returns = stockData.map(stock => ({
+                week: stock["1 Week Return (%)"],
+                month: stock["1 Month Return (%)"],
+                quarter: stock["3 Month Return (%)"]
+            }));
+
+            const allReturns = returns.flatMap(r => [r.week, r.month, r.quarter]);
+            const maxGain = Math.max(...allReturns);
+            const maxDrawdown = Math.min(...allReturns);
+
+            document.getElementById('maxGain').textContent = `${maxGain.toFixed(2)}%`;
+            document.getElementById('maxDrawdown').textContent = `${maxDrawdown.toFixed(2)}%`;
+        }
+
+        // Chart Generation
+        function generateCharts() {
+            const dates = [...new Set(stockData.map(item => item.Date))].sort();
+            const priceTrace = {
+                x: dates,
+                y: dates.map(date => 
+                    stockData.find(item => item.Date === date)?.["Identified Price"] || 0
+                ),
+                mode: 'lines+markers',
+                name: 'Price Trend',
+                line: { color: '#1f77b4' }
+            };
+
+            Plotly.newPlot('priceTrendChart', [priceTrace], {
+                title: 'Price Trend Over Time',
+                xaxis: { title: 'Date' },
+                yaxis: { title: 'Price' },
+                showlegend: true
+            });
+        }
+
+        // Sorting Functionality
+        document.querySelectorAll('th[data-sort]').forEach(header => {
+            header.addEventListener('click', () => {
+                const column = header.dataset.sort;
+                const sortKeys = {
+                    'stock': 'Stock',
+                    'date': 'Date',
+                    'price': 'Identified Price',
+                    '1week': '1 Week Return (%)',
+                    '1month': '1 Month Return (%)',
+                    '3month': '3 Month Return (%)'
+                };
+
+                const sortKey = sortKeys[column];
+                if (currentSort.column === sortKey) {
+                    currentSort.direction *= -1;
+                } else {
+                    currentSort = { column: sortKey, direction: 1 };
+                }
+
+                stockData.sort((a, b) => {
+                    if (sortKey === 'Date') {
+                        return currentSort.direction * 
+                            (new Date(a[sortKey]) - new Date(b[sortKey]));
+                    }
+                    return currentSort.direction * 
+                        (a[sortKey] - b[sortKey]);
+                });
+
+                updateTable();
+            });
+        });
+
+        // Automatically fetch data on page load
+        fetchStockData();
+    </script>
+</body>
+</html>

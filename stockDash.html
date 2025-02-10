@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stock Performance Dashboard</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; }
+        .container { width: 80%; margin: auto; }
+        input { margin-bottom: 20px; }
+        .chart { width: 100%; height: 400px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid black; padding: 8px; text-align: center; }
+        th { background-color: #f2f2f2; }
+        #error-message { color: red; font-weight: bold; display: none; }
+    </style>
+</head>
+<body>
+
+    <h2>Stock Performance Dashboard</h2>
+    <input type="file" id="fileInput" accept=".json">
+    <p id="error-message">⚠️ Error: Invalid JSON format. Please check your file.</p>
+    
+    <div class="container">
+        <h3>Stock Data Overview</h3>
+        <table id="stockTable">
+            <thead>
+                <tr>
+                    <th>Stock</th>
+                    <th>Identified Price</th>
+                    <th>1 Week Return (%)</th>
+                    <th>1 Month Return (%)</th>
+                    <th>3 Month Return (%)</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+
+        <div id="priceTrendChart" class="chart"></div>
+        <div id="returnsPieChart" class="chart"></div>
+        <div id="volatilityChart" class="chart"></div>
+        <div id="benchmarkComparisonChart" class="chart"></div>
+    </div>
+
+    <script>
+        document.getElementById('fileInput').addEventListener('change', function(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const jsonData = JSON.parse(e.target.result);
+                    console.log("Loaded JSON Data:", jsonData); // Debugging Log
+                    document.getElementById('error-message').style.display = "none"; // Hide error message
+                    generateDashboard(jsonData);
+                } catch (error) {
+                    console.error("Invalid JSON file!", error);
+                    document.getElementById('error-message').style.display = "block"; // Show error message
+                }
+            };
+            reader.readAsText(file);
+        });
+
+        function generateDashboard(data) {
+            if (!data || !Array.isArray(data)) {
+                document.getElementById('error-message').style.display = "block";
+                return;
+            }
+
+            let totalWeekReturn = 0, totalMonthReturn = 0, totalThreeMonthReturn = 0;
+            let count = 0;
+            let stockNames = [];
+            let stockPrices = [];
+            let weekReturns = [];
+            let monthReturns = [];
+            let threeMonthReturns = [];
+
+            // Clear table before inserting new data
+            const tableBody = document.querySelector("#stockTable tbody");
+            tableBody.innerHTML = "";
+
+            data.forEach(stock => {
+                if (stock["Stock"] && stock["Identified Price"] && stock["1 Week Return (%)"] && stock["1 Month Return (%)"] && stock["3 Month Return (%)"]) {
+                    totalWeekReturn += stock["1 Week Return (%)"];
+                    totalMonthReturn += stock["1 Month Return (%)"];
+                    totalThreeMonthReturn += stock["3 Month Return (%)"];
+                    count++;
+
+                    stockNames.push(stock["Stock"]);
+                    stockPrices.push(stock["Identified Price"]);
+                    weekReturns.push(stock["1 Week Return (%)"]);
+                    monthReturns.push(stock["1 Month Return (%)"]);
+                    threeMonthReturns.push(stock["3 Month Return (%)"]);
+
+                    const row = `<tr>
+                        <td>${stock["Stock"]}</td>
+                        <td>${stock["Identified Price"].toFixed(2)}</td>
+                        <td>${stock["1 Week Return (%)"].toFixed(2)}%</td>
+                        <td>${stock["1 Month Return (%)"].toFixed(2)}%</td>
+                        <td>${stock["3 Month Return (%)"].toFixed(2)}%</td>
+                    </tr>`;
+                    tableBody.innerHTML += row;
+                }
+            });
+
+            if (count === 0) {
+                document.getElementById('error-message').textContent = "⚠️ No valid stock data found in JSON!";
+                document.getElementById('error-message').style.display = "block";
+                return;
+            }
+
+            const avgWeekReturn = totalWeekReturn / count;
+            const avgMonthReturn = totalMonthReturn / count;
+            const avgThreeMonthReturn = totalThreeMonthReturn / count;
+
+            // 1. Stock Price Trend (Line Chart)
+            const priceTrendTrace = {
+                x: stockNames,
+                y: stockPrices,
+                type: 'scatter',
+                mode: 'lines+markers',
+                name: "Stock Prices"
+            };
+            Plotly.newPlot('priceTrendChart', [priceTrendTrace], { title: "Stock Price Trend" });
+
+            // 2. Returns Distribution (Pie Chart)
+            const returnsPieTrace = {
+                labels: ["1 Week", "1 Month", "3 Month"],
+                values: [avgWeekReturn, avgMonthReturn, avgThreeMonthReturn],
+                type: 'pie',
+                hole: 0.4 // Donut chart effect
+            };
+            Plotly.newPlot('returnsPieChart', [returnsPieTrace], { title: "Average Return Distribution" });
+
+            // 3. Volatility Indicator (Box Plot)
+            const volatilityTrace = {
+                y: stockPrices,
+                type: 'box',
+                name: "Stock Volatility"
+            };
+            Plotly.newPlot('volatilityChart', [volatilityTrace], { title: "Stock Volatility" });
+
+            // 4. Relative Performance vs Market (Bar Chart)
+            const benchmarkTrace = {
+                x: stockNames,
+                y: weekReturns.map(v => v * 1.05),
+                type: 'bar',
+                name: "Market Benchmark"
+            };
+            const stockTrace = {
+                x: stockNames,
+                y: weekReturns,
+                type: 'bar',
+                name: "Stock Performance"
+            };
+            Plotly.newPlot('benchmarkComparisonChart', [stockTrace, benchmarkTrace], { title: "Stock vs Market Benchmark" });
+        }
+    </script>
+
+</body>
+</html>
