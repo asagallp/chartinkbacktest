@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Modern Stock Analysis Dashboard</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Google Fonts (Poppins) -->
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <!-- DataTables CSS -->
+  <link rel="stylesheet" href="https://cdn.datatables.net/1.13.4/css/jquery.dataTables.min.css">
+  <!-- jQuery -->
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <!-- DataTables JS -->
+  <script src="https://cdn.datatables.net/1.13.4/js/jquery.dataTables.min.js"></script>
+  <!-- Prop Types -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prop-types/15.8.1/prop-types.min.js"></script>
+  <!-- React and ReactDOM -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <!-- Babel for JSX -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <!-- PapaParse for CSV -->
+  <script src="https://unpkg.com/papaparse@latest/papaparse.min.js"></script>
+  <!-- Chrono for date parsing -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/chrono-node/1.3.11/chrono.min.js"></script>
+  <!-- Recharts -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/recharts/2.15.0/Recharts.min.js"></script>
+  <style>
+    body {
+      font-family: 'Poppins', sans-serif;
+      background-color: #1a202c;
+      color: #ffffff;
+    }
+    .card {
+      background-color: #2d3748;
+      border-radius: 12px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+      transition: transform 0.2s ease-in-out;
+    }
+    .card:hover {
+      transform: translateY(-4px);
+    }
+    .highlight-1 { background-color: #fefcbf; }
+    .highlight-2 { background-color: #fef9c3; }
+    .highlight-3 { background-color: #fefce8; }
+    .positive-return { color: #34C759; font-weight: 500; }
+    .negative-return { color: #FF3B30; font-weight: 500; }
+    .stat-badge-positive { background-color: #34C759; color: #ffffff; padding: 2px 8px; border-radius: 12px; font-size: 12px; }
+    .stat-badge-negative { background-color: #FF3B30; color: #ffffff; padding: 2px 8px; border-radius: 12px; font-size: 12px; }
+    #dataTable { width: 100% !important; color: #ffffff; }
+    #dataTable thead th {
+      background-color: #4a5568;
+      color: #ffffff;
+      font-weight: 500;
+      font-size: 14px;
+      padding: 12px;
+      border-bottom: 2px solid #718096;
+    }
+    #dataTable tbody tr {
+      background-color: #2d3748;
+      transition: background-color 0.2s;
+      border-bottom: 1px solid #4a5568;
+    }
+    #dataTable tbody tr:hover {
+      background-color: #4a5568;
+    }
+    #dataTable tbody td {
+      font-size: 13px;
+      padding: 10px;
+      border-right: 1px solid #4a5568;
+    }
+    #dataTable tbody td:last-child {
+      border-right: none;
+    }
+    .dataTables_wrapper .dataTables_paginate .paginate_button {
+      padding: 0.5rem 1rem;
+      margin: 0 0.25rem;
+      border-radius: 0.375rem;
+      color: #ffffff;
+      background-color: #4a5568;
+    }
+    .dataTables_wrapper .dataTables_paginate .paginate_button:hover {
+      background-color: #718096;
+    }
+    .dataTables_wrapper .dataTables_filter input {
+      border: 1px solid #718096;
+      border-radius: 0.375rem;
+      padding: 0.5rem;
+      background-color: #2d3748;
+      color: #ffffff;
+    }
+    h1, h2 {
+      font-weight: 600;
+      color: #ffffff;
+    }
+    input[type="file"] {
+      background-color: #4a5568;
+      border: 1px solid #718096;
+      color: #ffffff;
+      padding: 0.5rem;
+      border-radius: 8px;
+    }
+  </style>
+</head>
+<body class="min-h-screen">
+  <div id="root" class="container mx-auto p-6"></div>
+
+  <script type="text/babel">
+    // Parsing data with robust error handling
+    const parseDate = (date) => {
+      if (!date) return null;
+      if (date instanceof Date) return date;
+      if (typeof date === 'number') return new Date(date);
+      return chrono.parseDate(date);
+    };
+
+    // Required columns for validation
+    const requiredColumns = [
+      'Stock', 'Date', 'Identified Price', 'Week Day 1 Close', 'Week Day 2 Close',
+      'Week Day 3 Close', 'Week Day 4 Close', 'Week Day 5 Close', 'Week Day 6 Close',
+      'Week Day 7 Close', '1 Month Close Price', '3 Month Close Price',
+      '1 Week Return (%)', '1 Month Return (%)', '3 Month Return (%)'
+    ];
+
+    // Cleaning and processing data
+    const processData = (data) => {
+      console.log('Processing data (first 2 rows):', data.slice(0, 2));
+      if (!Array.isArray(data)) {
+        console.error('Data is not an array:', data);
+        return [];
+      }
+      return data
+        .filter(row => row && row.Stock && row.Date)
+        .map(row => {
+          const cleaned = {};
+          Object.keys(row).forEach(key => {
+            let value = row[key];
+            if (value === '' || value === 'null' || value === null || value === undefined) {
+              value = null;
+            } else if (key === 'Date') {
+              value = parseDate(value);
+            } else if (key.includes('Price') || key.includes('Close') || key.includes('Return')) {
+              value = parseFloat(value);
+              if (isNaN(value)) value = null;
+            }
+            cleaned[key.trim().replace(/^"|"$/g, '')] = value;
+          });
+          // Calculate drawdown
+          const weekPrices = [
+            cleaned['Week Day 1 Close'],
+            cleaned['Week Day 2 Close'],
+            cleaned['Week Day 3 Close'],
+            cleaned['Week Day 4 Close'],
+            cleaned['Week Day 5 Close'],
+            cleaned['Week Day 6 Close'],
+            cleaned['Week Day 7 Close']
+          ].filter(price => price !== null);
+          if (weekPrices.length > 0) {
+            const peak = Math.max(...weekPrices);
+            const trough = Math.min(...weekPrices);
+            cleaned['Drawdown (%)'] = peak > 0 ? ((peak - trough) / peak) * 100 : null;
+          } else {
+            cleaned['Drawdown (%)'] = null;
+          }
+          return cleaned;
+        })
+        .filter(row => row.Date && row['Identified Price'] !== null);
+    };
+
+    // Validate CSV columns
+    const validateColumns = (headers) => {
+      const missing = requiredColumns.filter(col => !headers.includes(col));
+      return missing.length === 0 ? null : `Missing columns: ${missing.join(', ')}`;
+    };
+
+    // Main React component
+    const App = () => {
+      const [data, setData] = React.useState(null);
+      const [error, setError] = React.useState(null);
+
+      // Handling file input
+      const handleFileUpload = (event) => {
+        const file = event.target.files[0];
+        if (!file) return;
+        setError(null);
+        setData(null);
+
+        if (file.name.endsWith('.csv')) {
+          Papa.parse(file, {
+            header: true,
+            skipEmptyLines: true,
+            dynamicTyping: false,
+            transformHeader: header => header.trim().replace(/^"|"$/g, ''),
+            transform: (value, header) => value.trim().replace(/^"|"$/g, ''),
+            complete: (results) => {
+              try {
+                console.log('CSV headers:', Object.keys(results.data[0] || {}));
+                const columnError = validateColumns(Object.keys(results.data[0] || {}));
+                if (columnError) {
+                  setError(columnError + '. Please upload a CSV with all required columns.');
+                  return;
+                }
+                const cleanedData = processData(results.data);
+                if (cleanedData.length === 0) {
+                  setError('No valid data found after processing. Ensure the CSV contains valid Stock, Date, and Identified Price values.');
+                  return;
+                }
+                console.log('CSV processed data (first 2):', cleanedData.slice(0, 2));
+                setData(cleanedData);
+              } catch (err) {
+                console.error('CSV processing error:', err);
+                setError('Error processing CSV file: ' + err.message);
+              }
+            },
+            error: (err) => {
+              console.error('CSV parsing error:', err);
+              setError('Error parsing CSV: ' + err.message);
+            }
+          });
+        } else if (file.name.endsWith('.json')) {
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            try {
+              let jsonData;
+              const text = e.target.result;
+              console.log('JSON text (first 500 chars):', text.slice(0, 500));
+              if (text.trim().startsWith('{')) {
+                const objects = text
+                  .split('\n')
+                  .filter(line => line.trim().startsWith('{'))
+                  .map(line => {
+                    try {
+                      return JSON.parse(line.trim());
+                    } catch {
+                      return null;
+                    }
+                  })
+                  .filter(obj => obj !== null);
+                jsonData = objects;
+              } else {
+                jsonData = JSON.parse(text);
+              }
+              if (!Array.isArray(jsonData)) {
+                jsonData = [jsonData];
+              }
+              const cleanedData = processData(jsonData);
+              if (cleanedData.length === 0) {
+                setError('No valid data found after processing. Ensure the JSON contains valid Stock, Date, and Identified Price values.');
+                return;
+              }
+              console.log('JSON processed data (first 2):', cleanedData.slice(0, 2));
+              setData(cleanedData);
+            } catch (err) {
+              console.error('JSON processing error:', err);
+              setError('Error processing JSON file: ' + err.message);
+            }
+          };
+          reader.onerror = () => {
+            console.error('JSON reading error');
+            setError('Error reading JSON file');
+          };
+          reader.readAsText(file);
+        } else {
+          setError('Unsupported file format. Please upload a .csv or .json file.');
+        }
+      };
+
+      // Initializing DataTable
+      React.useEffect(() => {
+        if (data && Array.isArray(data) && data.length > 0) {
+          console.log('Initializing DataTable with data (first 2):', data.slice(0, 2));
+          const dataset = data;
+          try {
+            const table = $('#dataTable').DataTable({
+              data: data,
+              columns: [
+                { title: 'Stock', data: 'Stock' },
+                { title: 'Date', data: 'Date', render: date => date ? date.toLocaleDateString() : 'N/A' },
+                { title: 'Identified Price', data: 'Identified Price', render: price => price ? price.toFixed(2) : 'N/A' },
+                { title: 'Week Day 1 Close', data: 'Week Day 1 Close', render: price => price ? price.toFixed(2) : 'N/A' },
+                { title: 'Week Day 2 Close', data: 'Week Day 2 Close', render: price => price ? price.toFixed(2) : 'N/A' },
+                { title: 'Week Day 3 Close', data: 'Week Day 3 Close', render: price => price ? price.toFixed(2) : 'N/A' },
+                { title: 'Week Day 4 Close', data: 'Week Day 4 Close', render: price => price ? price.toFixed(2) : 'N/A' },
+                { title: 'Week Day 5 Close', data: 'Week Day 5 Close', render: price => price ? price.toFixed(2) : 'N/A' },
+                { title: 'Week Day 6 Close', data: 'Week Day 6 Close', render: price => price ? price.toFixed(2) : 'N/A' },
+                { title: 'Week Day 7 Close', data: 'Week Day 7 Close', render: price => price ? price.toFixed(2) : 'N/A' },
+                { title: '1 Month Close', data: '1 Month Close Price', render: price => price ? price.toFixed(2) : 'N/A' },
+                { title: '3 Month Close', data: '3 Month Close Price', render: price => price ? price.toFixed(2) : 'N/A' },
+                { 
+                  title: '1 Week Return (%)', 
+                  data: '1 Week Return (%)', 
+                  render: (ret, type, row) => {
+                    if (type === 'display' && ret !== null) {
+                      const className = ret >= 0 ? 'positive-return' : 'negative-return';
+                      return `<span class="${className}">${ret.toFixed(2)}</span>`;
+                    }
+                    return ret ? ret.toFixed(2) : 'N/A';
+                  }
+                },
+                { 
+                  title: '1 Month Return (%)', 
+                  data: '1 Month Return (%)', 
+                  render: (ret, type, row) => {
+                    if (type === 'display' && ret !== null) {
+                      const className = ret >= 0 ? 'positive-return' : 'negative-return';
+                      return `<span class="${className}">${ret.toFixed(2)}</span>`;
+                    }
+                    return ret ? ret.toFixed(2) : 'N/A';
+                  }
+                },
+                { 
+                  title: '3 Month Return (%)', 
+                  data: '3 Month Return (%)', 
+                  render: (ret, type, row) => {
+                    if (type === 'display' && ret !== null) {
+                      const className = ret >= 0 ? 'positive-return' : 'negative-return';
+                      return `<span class="${className}">${ret.toFixed(2)}</span>`;
+                    }
+                    return ret ? ret.toFixed(2) : 'N/A';
+                  }
+                },
+                { title: 'Drawdown (%)', data: 'Drawdown (%)', render: dd => dd ? dd.toFixed(2) : 'N/A' }
+              ],
+              pageLength: 10,
+              order: [[12, 'desc']],
+              createdRow: (row, rowData, index) => {
+                try {
+                  ['1 Week Return (%)', '1 Month Return (%)', '3 Month Return (%)'].forEach((key, i) => {
+                    const values = dataset.map(d => d[key] || null).filter(v => v !== null).sort((a, b) => b - a);
+                    const rank = values.indexOf(rowData[key]) + 1;
+                    if (rank <= 3 && rowData[key] !== null) {
+                      $(row).find(`td:eq(${12 + i})`).addClass(`highlight-${rank}`);
+                    }
+                  });
+                } catch (err) {
+                  console.error('Error in createdRow:', err);
+                }
+              }
+            });
+            return () => {
+              try {
+                table.destroy();
+              } catch (err) {
+                console.error('Error destroying DataTable:', err);
+              }
+            };
+          } catch (err) {
+            console.error('Error initializing DataTable:', err);
+            setError('Error rendering table: ' + err.message);
+          }
+        }
+      }, [data]);
+
+      // Calculating top performers
+      const getTopPerformers = (key, n = 5) => {
+        return data
+          ? [...data]
+              .filter(d => d[key] !== null)
+              .sort((a, b) => b[key] - a[key])
+              .slice(0, n)
+              .map(d => ({ stock: d.Stock, value: d[key], name: d.Stock }))
+          : [];
+      };
+
+      // Analyzing best return period
+      const bestReturnPeriodData = data
+        ? data.reduce((acc, d) => {
+            const returns = [
+              { period: '1 Week', value: d['1 Week Return (%)'] },
+              { period: '1 Month', value: d['1 Month Return (%)'] },
+              { period: '3 Month', value: d['3 Month Return (%)'] }
+            ].filter(r => r.value !== null);
+            if (returns.length > 0) {
+              const best = returns.reduce((max, r) => r.value > max.value ? r : max);
+              acc[best.period] = (acc[best.period] || 0) + 1;
+            }
+            return acc;
+          }, {})
+        : {};
+
+      const pieChartData = Object.keys(bestReturnPeriodData).map((key, index) => ({
+        name: key,
+        value: bestReturnPeriodData[key],
+        fill: ['#FF6B6B', '#4ECDC4', '#45B7D1'][index % 3]
+      }));
+
+      // Get top stock for each return period
+      const topStockByPeriod = data
+        ? ['1 Week Return (%)', '1 Month Return (%)', '3 Month Return (%)'].map(key => {
+            const topStock = [...data]
+              .filter(d => d[key] !== null)
+              .sort((a, b) => b[key] - a[key])[0];
+            return topStock ? { period: key.replace(' Return (%)', ''), stock: topStock.Stock, value: topStock[key] } : null;
+          }).filter(item => item !== null)
+        : [];
+
+      // Calculate summary statistics
+      const calculateStats = (key) => {
+        const values = data
+          ? data.map(d => d[key]).filter(v => v !== null)
+          : [];
+        if (values.length === 0) return { avg: 0, median: 0, stdDev: 0, highest: 0, lowest: 0 };
+
+        const avg = values.reduce((sum, v) => sum + v, 0) / values.length;
+        const sorted = [...values].sort((a, b) => a - b);
+        const median = sorted.length % 2 === 0
+          ? (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2
+          : sorted[Math.floor(sorted.length / 2)];
+        const variance = values.reduce((sum, v) => sum + Math.pow(v - avg, 2), 0) / values.length;
+        const stdDev = Math.sqrt(variance);
+        const highest = Math.max(...values);
+        const lowest = Math.min(...values);
+
+        return { avg, median, stdDev, highest, lowest };
+      };
+
+      const stats = {
+        '1 Week': calculateStats('1 Week Return (%)'),
+        '1 Month': calculateStats('1 Month Return (%)'),
+        '3 Month': calculateStats('3 Month Return (%)')
+      };
+
+      // Rendering loading state
+      if (!data) {
+        return (
+          <div className="text-center">
+            <h1 className="text-4xl font-bold mb-6">Stock Analysis Dashboard</h1>
+            <input
+              type="file"
+              accept=".csv,.json"
+              onChange={handleFileUpload}
+              className="mb-4 p-2 border rounded"
+            />
+            {error && <p className="text-red-400">{error}</p>}
+            <p className="text-gray-400">Please upload a CSV or JSON file to begin analysis.</p>
+          </div>
+        );
+      }
+
+      // Rendering main dashboard
+      return (
+        <div>
+          <h1 className="text-4xl font-bold mb-8 text-center">Stock Analysis Dashboard</h1>
+          <div className="flex justify-center mb-8">
+            <input
+              type="file"
+              accept=".csv,.json"
+              onChange={handleFileUpload}
+              className="p-2 border rounded"
+            />
+          </div>
+          {error && <p className="text-red-400 text-center mb-6">{error}</p>}
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+            {[
+              { title: 'Top 5 by 1 Week Return', key: '1 Week Return (%)' },
+              { title: 'Top 5 by 1 Month Return', key: '1 Month Return (%)' },
+              { title: 'Top 5 by 3 Month Return', key: '3 Month Return (%)' }
+            ].map(({ title, key }, idx) => (
+              <div key={title} className="card p-6">
+                <h2 className="text-xl font-semibold mb-4">{title}</h2>
+                <Recharts.ResponsiveContainer width="100%" height={250}>
+                  <Recharts.BarChart data={getTopPerformers(key)} margin={{ top: 10, right: 10, left: 10, bottom: 40 }}>
+                    <Recharts.CartesianGrid strokeDasharray="3 3" stroke="#4a5568" />
+                    <Recharts.XAxis dataKey="stock" angle={-45} textAnchor="end" interval={0} stroke="#ffffff" style={{ fontSize: 12 }} />
+                    <Recharts.YAxis stroke="#ffffff" style={{ fontSize: 12 }} />
+                    <Recharts.Tooltip formatter={(value) => `${value.toFixed(2)}%`} contentStyle={{ backgroundColor: '#2d3748', border: 'none', color: '#ffffff' }} />
+                    <Recharts.Legend verticalAlign="top" height={36} />
+                    <Recharts.Bar dataKey="value" name={title} fill={['#FF6B6B', '#4ECDC4', '#45B7D1'][idx]} />
+                  </Recharts.BarChart>
+                </Recharts.ResponsiveContainer>
+              </div>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+            <div className="card p-6">
+              <h2 className="text-xl font-semibold mb-4">Best Return Period Distribution</h2>
+              <div className="flex flex-col items-center">
+                <Recharts.ResponsiveContainer width="100%" height={300}>
+                  <Recharts.PieChart>
+                    <Recharts.Pie
+                      data={pieChartData}
+                      dataKey="value"
+                      nameKey="name"
+                      cx="50%"
+                      cy="50%"
+                      outerRadius={100}
+                      label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                      labelLine={true}
+                    />
+                    <Recharts.Tooltip 
+                      formatter={(value, name) => `${value} stocks (${((value / data.length) * 100).toFixed(1)}%)`} 
+                      contentStyle={{ backgroundColor: '#2d3748', border: 'none', color: '#ffffff' }} 
+                    />
+                    <Recharts.Legend />
+                  </Recharts.PieChart>
+                </Recharts.ResponsiveContainer>
+                <div className="mt-4 w-full">
+                  <h3 className="text-lg font-medium mb-2">Top Performers by Period</h3>
+                  <div className="grid grid-cols-1 gap-2">
+                    {topStockByPeriod.map(({ period, stock, value }) => (
+                      <div key={period} className="flex justify-between text-sm text-gray-300">
+                        <span>{period}: {stock}</span>
+                        <span className={value >= 0 ? 'positive-return' : 'negative-return'}>
+                          {value.toFixed(2)}%
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="card p-6">
+              <h2 className="text-xl font-semibold mb-4">Summary Statistics</h2>
+              <div className="grid grid-cols-1 gap-4 text-gray-300">
+                <div>
+                  <p className="text-sm font-medium">Total Stocks: <span className="text-white">{data.length}</span></p>
+                </div>
+                {['1 Week', '1 Month', '3 Month'].map(period => (
+                  <div key={period}>
+                    <h3 className="text-base font-medium mb-2">{period} Returns</h3>
+                    <div className="grid grid-cols-2 gap-2 text-sm">
+                      <p>Average: 
+                        <span className={`ml-2 ${stats[period].avg >= 0 ? 'stat-badge-positive' : 'stat-badge-negative'}`}>
+                          {stats[period].avg.toFixed(2)}%
+                        </span>
+                      </p>
+                      <p>Median: <span className="text-white">{stats[period].median.toFixed(2)}%</span></p>
+                      <p>Std Dev: <span className="text-white">{stats[period].stdDev.toFixed(2)}%</span></p>
+                      <p>Highest: 
+                        <span className={`ml-2 ${stats[period].highest >= 0 ? 'stat-badge-positive' : 'stat-badge-negative'}`}>
+                          {stats[period].highest.toFixed(2)}%
+                        </span>
+                      </p>
+                      <p>Lowest: 
+                        <span className={`ml-2 ${stats[period].lowest >= 0 ? 'stat-badge-positive' : 'stat-badge-negative'}`}>
+                          {stats[period].lowest.toFixed(2)}%
+                        </span>
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="card p-6">
+            <h2 className="text-xl font-semibold mb-4">Stock Data Table</h2>
+            <table id="dataTable" className="display"></table>
+          </div>
+        </div>
+      );
+    };
+
+    // Rendering the app
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
